@@ -4,10 +4,25 @@ import Foundation
 
 extension Array where Element == BlockNode {
   init(markdown: String) {
-    let blocks = UnsafeNode.parseMarkdown(markdown) { document in
-      document.children.compactMap(BlockNode.init(unsafeNode:))
-    }
-    self.init(blocks ?? .init())
+      // 1. 先用 cmark 进行标准解析，得到原始的 [BlockNode] 数组
+      let initialBlocks = UnsafeNode.parseMarkdown(markdown) { document in
+        document.children.compactMap(BlockNode.init(unsafeNode:))
+      } ?? [] // 如果解析失败，返回空数组
+      
+      // 2. 应用我们的 LaTeX 重写规则
+      //    由于 rewrite 方法可能会抛出异常，但这个 init 不是 throwing 的，
+      //    我们需要用 try? 来处理，或者让 init 也变成 throwing。
+      //    为了保持 API 兼容，我们使用 try?，这意味着如果重写失败，将返回原始块。
+      //    在我们的实现中，重写不会失败，所以这是安全的。
+      let rewrittenBlocks = (try? initialBlocks
+          .rewrite(latexBlockRule)
+          .rewrite(latexInlineRule)
+      ) ?? initialBlocks // 如果重写失败，回退到原始块
+
+      // 3. 用最终重写后的结果初始化自身
+      self.init(rewrittenBlocks)
+      
+      // --- 结束修改 ---
   }
 
   func renderMarkdown() -> String {
@@ -333,6 +348,13 @@ extension UnsafeNode {
     case .thematicBreak:
       guard let node = cmark_node_new(CMARK_NODE_THEMATIC_BREAK) else { return nil }
       return node
+    case .latexBlock(let content):
+      // 将我们的 .latexBlock 节点转换回一个 cmark 的代码块节点
+      // 并设置 fence info 为 "latex"
+      guard let node = cmark_node_new(CMARK_NODE_CODE_BLOCK) else { return nil }
+      cmark_node_set_fence_info(node, "latex")
+      cmark_node_set_literal(node, content)
+      return node
     }
   }
 
@@ -417,6 +439,12 @@ extension UnsafeNode {
       guard let node = cmark_node_new(CMARK_NODE_IMAGE) else { return nil }
       cmark_node_set_url(node, source)
       children.compactMap(UnsafeNode.make).forEach { cmark_node_append_child(node, $0) }
+      return node
+    case .latex(let content):
+      // 将我们的 .latex 行内节点转换回一个 cmark 的文本节点
+      // 格式为 "$...$"
+      guard let node = cmark_node_new(CMARK_NODE_TEXT) else { return nil }
+      cmark_node_set_literal(node, "$\(content)$")
       return node
     }
   }

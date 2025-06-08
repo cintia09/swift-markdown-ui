@@ -61,6 +61,8 @@ private struct AttributedStringInlineRenderer {
       self.renderLink(destination: destination, children: children)
     case .image(let source, let children):
       self.renderImage(source: source, children: children)
+    case .latex(let content):
+      self.renderLatexAsAttachment(content)
     }
   }
 
@@ -153,6 +155,51 @@ private struct AttributedStringInlineRenderer {
 
   private mutating func renderImage(source: String, children: [InlineNode]) {
     // AttributedString does not support images
+  }
+    
+  private mutating func renderLatexAsAttachment(_ content: String) {
+    // 这里是你对接 SwiftMath 或 MTMathUILabel 的地方
+    // 假设你有一个可以工作的 MathView，我们可以借用它的渲染逻辑
+    // 或者直接调用 MTMathUILabel
+        
+    // 示例：直接使用 MTMathUILabel
+    /*let label = MTMathUILabel()
+    label.latex = content
+    label.labelMode = .text // 行内模式
+        
+    // 从当前 attributes 中获取字体大小和颜色
+    let fontSize = self.attributes.fontProperties?.size ?? 16
+    label.font = MTFontManager.sharedInstance().latinModernFont(withSize: fontSize)
+    if let foregroundColor = self.attributes.foregroundColor {
+        label.textColor = MTColor(foregroundColor)
+    }
+
+    // 渲染为 NSImage / UIImage
+    guard let image = label.snapshotImage() else {
+        // 渲染失败的回退方案
+        self.result += AttributedString("$\(content)$", attributes: self.attributes)
+        return
+    }
+
+    // 创建并配置文本附件
+    var attachmentString = AttributedString(string: "\u{FFFC}") // Object Replacement Character
+    let attachment = NSTextAttachment(image: image)
+    
+    // [关键] 基线对齐
+    let font = self.attributes.uiKit.font ?? .systemFont(ofSize: fontSize)
+    // 将图片的垂直中心对齐到字体的 x-height 中心
+    let imageCenterY = image.size.height / 2.0
+    let fontCenterY = font.xHeight / 2.0
+    attachment.bounds = CGRect(x: 0, y: -(imageCenterY - fontCenterY), width: image.size.width, height: image.size.height)
+    
+    // 将附件应用到 AttributedString
+    #if canImport(UIKit)
+    attachmentString.attachment = attachment
+    #elseif canImport(AppKit)
+    attachmentString.appKit.attachment = attachment
+    #endif
+
+    self.result += attachmentString*/
   }
 }
 
