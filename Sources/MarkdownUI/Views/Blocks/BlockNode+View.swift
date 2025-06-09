@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftMath
 
 extension BlockNode: View {
     var body: some View {
@@ -26,9 +27,10 @@ extension BlockNode: View {
         case .thematicBreak:
             ThematicBreakView()
         case .latexBlock(let content):
+            ParagraphView(content: content)
             // 这里调用你的 LaTeX 渲染视图，例如 MathView
             // 确保 MathView 已经添加到你的项目中
-            MathView(equation: content) // 使用块级显示模式
+            //MathView(equation: content) // 使用块级显示模式
             // 使用 MarkdownUI 的边距系统，实现与其他块的无缝间距
                 //.markdownMargin(top: .em(1), bottom: .em(1))
         }

@@ -1,4 +1,6 @@
 import Foundation
+import SwiftMath
+import SwiftUI
 
 extension InlineNode {
   func renderAttributedString(
@@ -158,45 +160,51 @@ private struct AttributedStringInlineRenderer {
   }
     
   private mutating func renderLatexAsAttachment(_ content: String) {
-    // 这里是你对接 SwiftMath 或 MTMathUILabel 的地方
-    // 假设你有一个可以工作的 MathView，我们可以借用它的渲染逻辑
-    // 或者直接调用 MTMathUILabel
-        
-    // 示例：直接使用 MTMathUILabel
-    /*let label = MTMathUILabel()
-    label.latex = content
-    label.labelMode = .text // 行内模式
-        
-    // 从当前 attributes 中获取字体大小和颜色
+  var text = content
+
+  if self.shouldSkipNextWhitespace {
+    self.shouldSkipNextWhitespace = false
+    text = text.replacingOccurrences(of: "^\\s+", with: "", options: .regularExpression)
+  }
+
+  self.result += .init(text, attributes: self.attributes)
+      /*
     let fontSize = self.attributes.fontProperties?.size ?? 16
-    label.font = MTFontManager.sharedInstance().latinModernFont(withSize: fontSize)
-    if let foregroundColor = self.attributes.foregroundColor {
-        label.textColor = MTColor(foregroundColor)
-    }
+    let foregroundColor = self.attributes.foregroundColor ?? .primary
 
-    // 渲染为 NSImage / UIImage
-    guard let image = label.snapshotImage() else {
-        // 渲染失败的回退方案
-        self.result += AttributedString("$\(content)$", attributes: self.attributes)
-        return
-    }
+    //print("renderLatexAsAttachment:\n\(content)\n")
+    // 渲染为 NSImage
+    let (_, nsImage) = MTMathImage(
+      latex: content,
+      fontSize: fontSize,
+      textColor: MTColor(foregroundColor),
+      labelMode: .text
+    ).asImage()
 
-    // 创建并配置文本附件
-    var attachmentString = AttributedString(string: "\u{FFFC}") // Object Replacement Character
-    let attachment = NSTextAttachment(image: image)
-    
-    // [关键] 基线对齐
-    let font = self.attributes.uiKit.font ?? .systemFont(ofSize: fontSize)
-    // 将图片的垂直中心对齐到字体的 x-height 中心
-    let imageCenterY = image.size.height / 2.0
-    let fontCenterY = font.xHeight / 2.0
-    attachment.bounds = CGRect(x: 0, y: -(imageCenterY - fontCenterY), width: image.size.width, height: image.size.height)
-    
-    // 将附件应用到 AttributedString
-    #if canImport(UIKit)
-    attachmentString.attachment = attachment
-    #elseif canImport(AppKit)
+    // 渲染失败回退
+    guard let image = nsImage else {
+      self.result += AttributedString("\(content)", attributes: self.attributes)
+      return
+    }
+      print("renderLatexAsAttachment:\n\(content)\n")
+    // 创建 NSTextAttachment
+    let attachment = NSTextAttachment()
+    attachment.image = image
+
+    // 计算基线偏移
+    let font = self.attributes.appKit.font ?? .systemFont(ofSize: fontSize)
+    let imageHeight = image.size.height
+    let fontXHeight = font.xHeight
+    let offset = (imageHeight / 2.0) - (fontXHeight / 2.0)
+    let baselineOffset = -offset
+
+    var attachmentString = AttributedString("\u{FFFC}")
+    #if canImport(AppKit)
+    attachment.bounds = CGRect(x: 0, y: baselineOffset, width: image.size.width, height: image.size.height)
     attachmentString.appKit.attachment = attachment
+    #elseif canImport(UIKit)
+    attachment.bounds = CGRect(x: 0, y: baselineOffset, width: image.size.width, height: image.size.height)
+    attachmentString.attachment = attachment
     #endif
 
     self.result += attachmentString*/

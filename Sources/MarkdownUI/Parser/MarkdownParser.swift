@@ -15,7 +15,7 @@ extension Array where Element == BlockNode {
       //    为了保持 API 兼容，我们使用 try?，这意味着如果重写失败，将返回原始块。
       //    在我们的实现中，重写不会失败，所以这是安全的。
       let rewrittenBlocks = (try? initialBlocks
-          .rewrite(latexBlockRule)
+          //.rewrite(latexBlockRule)
           .rewrite(latexInlineRule)
       ) ?? initialBlocks // 如果重写失败，回退到原始块
 

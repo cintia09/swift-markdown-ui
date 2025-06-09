@@ -4,7 +4,7 @@ import Foundation
 // 规则 1: 将代码块或包含块级 LaTeX 的段落进行分割和重写
 @MainActor // 确保你的 LatexExtractor.parseSegments 是在主线程调用
 func latexBlockRule(block: BlockNode) -> [BlockNode] {
-    #if false
+    #if true
     guard case .paragraph(let children) = block,
           children.count == 1,
           case .text(let text) = children.first else {
@@ -152,8 +152,8 @@ func latexInlineRule(inline: InlineNode) -> [InlineNode] {
     var newInlines: [InlineNode] = []
     for segment in segments {
         if segment.isLatex {
-            let latexContent = stripLatexDelimiters(from: segment.content)
-            newInlines.append(.latex(content: latexContent))
+            //let latexContent = stripLatexDelimiters(from: segment.content)
+            newInlines.append(.latex(content: segment.content))
         } else {
             newInlines.append(.text(segment.content))
         }
