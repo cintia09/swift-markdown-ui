@@ -158,56 +158,12 @@ private struct AttributedStringInlineRenderer {
   private mutating func renderImage(source: String, children: [InlineNode]) {
     // AttributedString does not support images
   }
-    
+
   private mutating func renderLatexAsAttachment(_ content: String) {
-  var text = content
-
-  if self.shouldSkipNextWhitespace {
-    self.shouldSkipNextWhitespace = false
-    text = text.replacingOccurrences(of: "^\\s+", with: "", options: .regularExpression)
-  }
-
-  self.result += .init(text, attributes: self.attributes)
-      /*
-    let fontSize = self.attributes.fontProperties?.size ?? 16
-    let foregroundColor = self.attributes.foregroundColor ?? .primary
-
-    //print("renderLatexAsAttachment:\n\(content)\n")
-    // 渲染为 NSImage
-    let (_, nsImage) = MTMathImage(
-      latex: content,
-      fontSize: fontSize,
-      textColor: MTColor(foregroundColor),
-      labelMode: .text
-    ).asImage()
-
-    // 渲染失败回退
-    guard let image = nsImage else {
-      self.result += AttributedString("\(content)", attributes: self.attributes)
-      return
-    }
-      print("renderLatexAsAttachment:\n\(content)\n")
-    // 创建 NSTextAttachment
-    let attachment = NSTextAttachment()
-    attachment.image = image
-
-    // 计算基线偏移
-    let font = self.attributes.appKit.font ?? .systemFont(ofSize: fontSize)
-    let imageHeight = image.size.height
-    let fontXHeight = font.xHeight
-    let offset = (imageHeight / 2.0) - (fontXHeight / 2.0)
-    let baselineOffset = -offset
-
-    var attachmentString = AttributedString("\u{FFFC}")
-    #if canImport(AppKit)
-    attachment.bounds = CGRect(x: 0, y: baselineOffset, width: image.size.width, height: image.size.height)
-    attachmentString.appKit.attachment = attachment
-    #elseif canImport(UIKit)
-    attachment.bounds = CGRect(x: 0, y: baselineOffset, width: image.size.width, height: image.size.height)
-    attachmentString.attachment = attachment
-    #endif
-
-    self.result += attachmentString*/
+    self.result += .init(content, attributes: self.attributes)
+    //self.result += LatexAttributing(content, att: self.attributes)
+    //self.result += .init(LatexView(content), attributes: self.attributes)
+    //let _ = print("============:\n\(content)\n")
   }
 }
 
