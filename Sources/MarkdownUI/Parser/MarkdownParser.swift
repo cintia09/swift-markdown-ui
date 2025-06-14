@@ -4,12 +4,13 @@ import Foundation
 
 extension Array where Element == BlockNode {
   init(markdown: String) {
-      let initialBlocks = UnsafeNode.parseMarkdown(markdown) { document in
+      let preproccedMarkdown = SimpleLatexExtractor.preprocess(markdown: markdown)
+      let initialBlocks = UnsafeNode.parseMarkdown(preproccedMarkdown) { document in
         document.children.compactMap(BlockNode.init(unsafeNode:))
       } ?? []
 
       let rewrittenBlocks = (try? initialBlocks
-          .rewrite(latexInlineRule)
+        .rewrite(SimpleLatexExtractor.latexBlockNodeRule)
       ) ?? initialBlocks
 
       self.init(rewrittenBlocks)
@@ -338,6 +339,9 @@ extension UnsafeNode {
     case .thematicBreak:
       guard let node = cmark_node_new(CMARK_NODE_THEMATIC_BREAK) else { return nil }
       return node
+    case .latexBlock(let content):
+      guard let node = cmark_node_new(CMARK_NODE_THEMATIC_BREAK) else { return nil }
+      return node
     }
   }
 
@@ -422,12 +426,6 @@ extension UnsafeNode {
       guard let node = cmark_node_new(CMARK_NODE_IMAGE) else { return nil }
       cmark_node_set_url(node, source)
       children.compactMap(UnsafeNode.make).forEach { cmark_node_append_child(node, $0) }
-      return node
-    case .latex(let content):
-      // 将我们的 .latex 行内节点转换回一个 cmark 的文本节点
-      // 格式为 "$...$"
-      guard let node = cmark_node_new(CMARK_NODE_TEXT) else { return nil }
-      cmark_node_set_literal(node, "$\(content)$")
       return node
     }
   }

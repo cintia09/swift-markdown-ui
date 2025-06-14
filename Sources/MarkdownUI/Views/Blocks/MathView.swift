@@ -13,15 +13,22 @@ import SwiftMath
 
 // MARK: - macOS Implementation
 struct MathView: NSViewRepresentable {
+    @Environment(\.textStyle) var textStyle
+    
+    private var attributes: AttributeContainer {
+      var attributes = AttributeContainer()
+      self.textStyle._collectAttributes(in: &attributes)
+      return attributes
+    }
+    
     var equation: String
     var font: MathFont = .latinModernFont
     var textAlignment: MTTextAlignment = .center
     var fontSize: CGFloat = 14
     var labelMode: MTMathUILabelMode = .display
     var insets: MTEdgeInsets = MTEdgeInsets()
-    var textColor: MTColor = MTColor.white // MTColor 在 SwiftMath 中已经是跨平台的 (NSColor/UIColor)
+    var textColor = MTColor(.primary)
     
-    // 在初始化时处理颜色，使其更符合 SwiftUI 的方式
     /*init(equation: String, font: MathFont = .latinModernFont, textAlignment: MTTextAlignment = .center, fontSize: CGFloat = 14, labelMode: MTMathUILabelMode = .display, insets: MTEdgeInsets = .zero, textColor: Color = .primary) {
         self.equation = equation
         self.font = font
@@ -37,8 +44,9 @@ struct MathView: NSViewRepresentable {
     }
     
     func updateNSView(_ view: MTMathUILabel, context: Context) {
+        let newFontSize = attributes.fontProperties?.size ?? fontSize
         view.latex = equation
-        view.font = MTFontManager().font(withName: font.rawValue, size: fontSize)
+        view.font = MTFontManager().font(withName: font.rawValue, size: newFontSize)
         view.textAlignment = textAlignment
         view.labelMode = labelMode
         view.textColor = textColor

@@ -63,8 +63,6 @@ private struct AttributedStringInlineRenderer {
       self.renderLink(destination: destination, children: children)
     case .image(let source, let children):
       self.renderImage(source: source, children: children)
-    case .latex(let content):
-      self.renderLatexAsAttachment(content)
     }
   }
 
@@ -157,13 +155,6 @@ private struct AttributedStringInlineRenderer {
 
   private mutating func renderImage(source: String, children: [InlineNode]) {
     // AttributedString does not support images
-  }
-
-  private mutating func renderLatexAsAttachment(_ content: String) {
-    self.result += .init(content, attributes: self.attributes)
-    //self.result += LatexAttributing(content, att: self.attributes)
-    //self.result += .init(LatexView(content), attributes: self.attributes)
-    //let _ = print("============:\n\(content)\n")
   }
 }
 

@@ -62,8 +62,6 @@ private struct TextInlineRenderer {
       self.renderHTML(content)
     case .image(let source, _):
       self.renderImage(source)
-    case .latex(let content):
-      self.renderLatex(content)
     default:
       self.defaultRender(inline)
     }
@@ -109,14 +107,10 @@ private struct TextInlineRenderer {
       self.result = self.result + Text(image)
     }
   }
-
-  private mutating func renderLatex(_ source: String) {
-      self.result = self.result + LatexView(source, att: self.attributes)
-  }
     
   private mutating func defaultRender(_ inline: InlineNode) {
     self.result = self.result +
-        renderLatexInText(
+        SimpleLatexExtractor.renderTextWithLatex(
             from: inline.renderAttributedString(
                 baseURL: self.baseURL,
                 textStyles: self.textStyles,
@@ -125,37 +119,5 @@ private struct TextInlineRenderer {
             ),
             container: self.attributes
         )
-      /*+ Text(
-        inline.renderAttributedString(
-          baseURL: self.baseURL,
-          textStyles: self.textStyles,
-          softBreakMode: self.softBreakMode,
-          attributes: self.attributes
-        )
-      )*/
   }
-    
-    /*private func extractAllText(from inlines: [InlineNode]) -> [String] {
-        var result: [String] = []
-
-        for inline in inlines {
-            switch inline {
-            case .text(let text):
-                result.append(text)
-
-            case .strong(let children),
-                 .emphasis(let children),
-                 .strikethrough(let children),
-                 .link(_, let children),
-                 .image(_, let children):
-                // 递归提取子节点中的文本
-                result.append(contentsOf: extractAllText(from: children))
-
-            default:
-                break
-            }
-        }
-
-        return result
-    }*/
 }
