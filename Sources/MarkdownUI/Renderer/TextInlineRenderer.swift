@@ -92,7 +92,6 @@ private struct TextInlineRenderer {
 
   private mutating func renderHTML(_ html: String) {
     let tag = HTMLTag(html)
-
     switch tag?.name.lowercased() {
     case "br":
       self.defaultRender(.lineBreak)
@@ -109,15 +108,16 @@ private struct TextInlineRenderer {
   }
     
   private mutating func defaultRender(_ inline: InlineNode) {
+    let attributedString = inline.renderAttributedString(
+      baseURL: self.baseURL,
+      textStyles: self.textStyles,
+      softBreakMode: self.softBreakMode,
+      attributes: self.attributes
+    )
+      
+    //print("============\n\(attributedString)\n")
     self.result = self.result +
-        SimpleLatexExtractor.renderTextWithLatex(
-            from: inline.renderAttributedString(
-                baseURL: self.baseURL,
-                textStyles: self.textStyles,
-                softBreakMode: self.softBreakMode,
-                attributes: self.attributes
-            ),
-            container: self.attributes
-        )
+      SimpleLatexExtractor
+        .renderTextWithLatex(from: attributedString, container: self.attributes)
   }
 }

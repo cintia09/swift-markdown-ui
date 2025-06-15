@@ -26,8 +26,7 @@ extension BlockNode: View {
         case .thematicBreak:
             ThematicBreakView()
         case .latexBlock(let content):
-            MathView(equation: content)
-                .padding(.vertical, 10)
+            LatexBlockView(latexString: content)
         }
     }
 }
