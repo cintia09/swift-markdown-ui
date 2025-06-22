@@ -4,16 +4,16 @@ import Foundation
 
 extension Array where Element == BlockNode {
   init(markdown: String) {
-      let preproccedMarkdown = SimpleLatexExtractor.preprocess(markdown: markdown)
-      let initialBlocks = UnsafeNode.parseMarkdown(preproccedMarkdown) { document in
+      //let preproccedMarkdown = SimpleLatexExtractor.preprocess(markdown: markdown)
+      let initialBlocks = UnsafeNode.parseMarkdown(markdown) { document in
         document.children.compactMap(BlockNode.init(unsafeNode:))
       } ?? []
 
-      let rewrittenBlocks = (try? initialBlocks
-        .rewrite(SimpleLatexExtractor.latexBlockNodeRule)
-      ) ?? initialBlocks
+      //let rewrittenBlocks = (try? initialBlocks
+      //  .rewrite(SimpleLatexExtractor.latexBlockNodeRule)
+      //) ?? initialBlocks
 
-      self.init(rewrittenBlocks)
+      self.init(initialBlocks)
   }
 
   func renderMarkdown() -> String {
@@ -339,9 +339,9 @@ extension UnsafeNode {
     case .thematicBreak:
       guard let node = cmark_node_new(CMARK_NODE_THEMATIC_BREAK) else { return nil }
       return node
-    case .latexBlock(let content):
-      guard let node = cmark_node_new(CMARK_NODE_THEMATIC_BREAK) else { return nil }
-      return node
+    //case .latexBlock(let content):
+    //  guard let node = cmark_node_new(CMARK_NODE_THEMATIC_BREAK) else { return nil }
+    //  return node
     }
   }
 

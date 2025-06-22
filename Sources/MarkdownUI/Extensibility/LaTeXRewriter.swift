@@ -1,667 +1,4 @@
-// In: Sources/MarkdownUI/LaTeXRewriter.swift
-import Foundation
-import SwiftUI
-import SwiftMath
-/*
-func latexBlockNodeRule(blockNode: BlockNode) -> [BlockNode] {
-    guard case .paragraph(let children) = blockNode,
-          case .text(let text) = children.first  else {
-        return [blockNode]
-    }
-    let recoverText = SimpleLatexExtractor.recoverLatex(from: text)
-    print("\n++++++++++++start\n\(recoverText)\n+++++++++++++end")
-    if !recoverText.contains("$")
-        && !recoverText.contains("\\(")
-        && !recoverText.contains("\\[")
-        && !recoverText.contains("$$") {
-        //print("There is no latex\n")
-        return [inline]
-    }
-    
-    let segmentsInLines = parseMixedContentLine(recoverText)
-    //print("----------:\n\(segmentsInLines)\n")
-    if segmentsInLines.count <= 1 && segmentsInLines.first?.isLatex == false {
-        return [inline]
-    }
-    
-    var newInlines: [InlineNode] = []
-    for segment in segmentsInLines {
-        //print("----------:\n\(segment.content)\n")
-        if segment.isLatex {
-            //print("++++++++++++:\n\(segment.content)\n")
-            //let content = fixLatexSyntax(in: segment.content)
-            newInlines.append(.latex(content: segment.content))
-            //print("----------:\n\(segment.content)\n")
-        } else {
-            newInlines.append(.text(segment.content))
-            //print("++++++++++++:\n\(segment.content)\n")
-        }
-    }
-    
-    return newInlines
-}
-
-/// 接收一个确认是LaTeX的字符串，并修复其中常见的语法和转义错误。
-/// 这个函数是高度优化的，专门用于修复单行的、可能包含错误的LaTeX代码。
-/// 修复顺序经过精心设计，以避免一个修复破坏另一个修复。
-///
-/// - Parameter latexString: 输入的、可能包含错误的LaTeX字符串。
-/// - Returns: 修复后的LaTeX字符串。
-private func fixLatexSyntax(in latexString: String) -> String {
-    var text = latexString
-
-    // --- 修复1: 恢复矩阵和多行公式中丢失的换行符 `\\` ---
-    // 策略：在 \begin{...} 和 \end{...} 环境内部，查找一个单独的、后面不跟已知命令或花括号的 `\`，
-    // 并强制将其恢复为 `\\`。这能非常精确地修复 `a & b \ c & d` 这样的错误。
-    let environments = [
-        "pmatrix", "bmatrix", "vmatrix", "matrix",
-        "cases",
-        "align", "align*", "aligned", "alignedat",
-        "gather", "gather*", "gathered",
-        "split", "eqnarray", "eqnarray*"
-    ]
-    
-    for env in environments {
-        let pattern = ##"(\\begin\{"## + env + ##"\} .*? \\end\{"## + env + ##"\})"##
-        let regex = try! NSRegularExpression(pattern: pattern, options: .dotMatchesLineSeparators)
-        
-        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-        
-        for match in matches.reversed() {
-            guard let fullRange = Range(match.range(at: 1), in: text) else { continue }
-            
-            var environmentContent = String(text[fullRange])
-            
-            // 匹配一个`\`，条件是：它前面没有另一个`\`，且后面不跟字母、星号或花括号。
-            let brokenNewlineRegex = try! NSRegularExpression(pattern: #"(?<!\\)\\(?![a-zA-Z*{}])"#)
-            environmentContent = brokenNewlineRegex.stringByReplacingMatches(
-                in: environmentContent,
-                range: NSRange(environmentContent.startIndex..., in: environmentContent),
-                withTemplate: "\\\\\\\\" // 替换为字面量的 `\\`
-            )
-            
-            text.replaceSubrange(fullRange, with: environmentContent)
-        }
-    }
-
-    // --- 修复2: 修复 `\text{...}` 内部的转义空格 (`\ ` -> ` `) ---
-    let textEnvRegexForSpace = try! NSRegularExpression(pattern: #"\\text\s*\{([^}]*)\}"#)
-    let textMatchesForSpace = textEnvRegexForSpace.matches(in: text, range: NSRange(text.startIndex..., in: text))
-    for match in textMatchesForSpace.reversed() {
-        guard let fullRange = Range(match.range, in: text),
-              let contentRange = Range(match.range(at: 1), in: text) else { continue }
-        let fixedContent = String(text[contentRange]).replacingOccurrences(of: "\\ ", with: " ")
-        text.replaceSubrange(fullRange, with: "\\text{\(fixedContent)}")
-    }
-    
-    // --- 【修复2.5】: (真正安全版) 恢复 LaTeX 中常见的未转义字符 ---
-    var protectedBlocks: [String: String] = [:] // 使用字典来确保占位符唯一
-    var mutableText = text
-
-    // 步骤 1: 从后向前，用唯一的占位符替换 \text{...} 块
-    let protectionRegex = try! NSRegularExpression(pattern: #"\\text\s*\{[^}]*\}"#)
-    let protectionMatches = protectionRegex.matches(in: mutableText, range: NSRange(mutableText.startIndex..., in: mutableText))
-
-    for (i, match) in protectionMatches.enumerated().reversed() {
-        guard let range = Range(match.range, in: mutableText) else { continue }
-        
-        let originalBlock = String(mutableText[range])
-        let placeholder = "__PROTECTED_BLOCK_\(i)__" // 占位符现在与原始匹配顺序绑定
-        
-        protectedBlocks[placeholder] = originalBlock
-        mutableText.replaceSubrange(range, with: placeholder)
-    }
-
-    // 步骤 2: 在被“净化”过的字符串上执行转义 (这部分逻辑是正确的，保持不变)
-    let latexSpecials = ["%", "#"]
-    for symbol in latexSpecials {
-        let pattern = #"(?<!\\)"# + NSRegularExpression.escapedPattern(for: symbol)
-        let regex = try! NSRegularExpression(pattern: pattern)
-        mutableText = regex.stringByReplacingMatches(
-            in: mutableText,
-            range: NSRange(mutableText.startIndex..., in: mutableText),
-            withTemplate: "\\\\" + symbol
-        )
-    }
-
-    // 步骤 3: 遍历字典，将被保护的块恢复原状
-    for (placeholder, originalBlock) in protectedBlocks {
-        mutableText = mutableText.replacingOccurrences(of: placeholder, with: originalBlock, options: .literal)
-    }
-
-    text = mutableText // 将修复后的文本赋回
-    
-    // --- 修复3: 确保矩阵中的 `&` 符号周围有空格 ---
-    let tightAlignRegex = try! NSRegularExpression(pattern: #"(\S)&(\S)"#)
-    text = tightAlignRegex.stringByReplacingMatches(
-        in: text,
-        range: NSRange(text.startIndex..., in: text),
-        withTemplate: "$1 & $2"
-    )
-    
-    // 匹配一个 `_` 或 `^`，后面跟着至少一个不是分隔符或花括号的字符
-    let danglingSubscriptRegex = try! NSRegularExpression(
-        pattern: #"([_^])\s*([^{}\s\\$][^{}\s\\$]*)"# // <-- 在字符集中增加了 `$`
-    )
-    text = danglingSubscriptRegex.stringByReplacingMatches(
-        in: text,
-        range: NSRange(text.startIndex..., in: text),
-        withTemplate: "$1{$2}"
-    )
-    
-    return text
-}
-
-private func parseMixedContentLine(_ line: String) -> [(isLatex: Bool, content: String)] {
-    var segments: [(isLatex: Bool, content: String)] = []
-    var currentIndex = line.startIndex
-
-    // --- 【最终、最强健的正则表达式】 ---
-    let combinedRegex = try! NSRegularExpression(pattern:
-    #"""
-    (?sx) # s: '.' 匹配换行符; x: 扩展模式
-
-    # --- 1. CODE 组 (最优先匹配，规则已强化) ---
-    (?<CODE>
-        `{3,}[\s\S]+?`{3,}  # 围栏代码块，可以跨行
-        |
-        ``[\s\S]+?``      # 双反引号，可以包含 `
-        |
-        `[^`]+?`          # 单反引号，不能包含 `
-    )
-
-    | # --- 或者 ---
-
-    # --- 2. LATEX 组 (修复了内联公式的匹配) ---
-    (?<LATEX>
-        # a. 块级公式 (明确且优先)
-        \$\$[\s\S]+?\$\$
-        |
-        \\\[[\s\S]+?\\\]
-        
-        | # 或
-        
-        # b. 【核心修复】内联公式 $...$
-        #    匹配一个'$'，它前面不是另一个'$'或反斜杠
-        (?<!\$|\\)
-        \$
-        #    匹配任何非'$'字符，或者被转义的'$' (\$)
-        (?:\\. | [^$])+?
-        #    直到匹配一个'$'，它后面不是另一个'$'
-        \$
-        (?!\$)
-        
-        | # 或，另一种内联形式 \( ... \)
-        
-        \\\(.+?\\\)
-        | # 或，另一种内联形式 \( ... \)
-                
-        \\\(          # 匹配字面的 \(
-        [\s\S]+?    # 匹配任何内容，非贪婪
-        \\\)          # 匹配字面的 \)
-        )
-    """#, options: [])
-    
-    // --- 后续的处理逻辑完全正确，无需修改 ---
-    let matches = combinedRegex.matches(in: line, range: NSRange(line.startIndex..., in: line))
-    
-    var lastMatchEnd = line.startIndex
-    for match in matches {
-        guard let matchRange = Range(match.range, in: line) else { continue }
-        
-        // 追加上一个匹配和当前匹配之间的普通文本
-        if matchRange.lowerBound > lastMatchEnd {
-            let textSegment = String(line[lastMatchEnd..<matchRange.lowerBound])
-            segments.append((isLatex: false, content: textSegment))
-        }
-        
-        // 检查哪个命名组匹配成功
-        let content = String(line[matchRange])
-        if match.range(withName: "CODE").location != NSNotFound {
-            segments.append((isLatex: false, content: content))
-        }
-        else if match.range(withName: "LATEX").location != NSNotFound {
-            segments.append((isLatex: true, content: content))
-        }
-        
-        lastMatchEnd = matchRange.upperBound
-    }
-    
-    // 追加最后一个匹配之后的所有剩余文本
-    if lastMatchEnd < line.endIndex {
-        segments.append((isLatex: false, content: String(line[lastMatchEnd...])))
-    }
-    
-    // 如果没有任何匹配，则整个字符串都是普通文本
-    if segments.isEmpty && !line.isEmpty {
-        segments.append((isLatex: false, content: line))
-    }
-    
-    return segments.filter { !$0.content.isEmpty }
-}
-
-private func LatexView(_ source: String, att: AttributeContainer) -> Text {
-    let fontSize = att.fontProperties?.size ?? 14
-    let foregroundColor = att.foregroundColor ?? .primary
-    let hasLatexBlock = source.hasPrefix("$$") && source.hasSuffix("$$")
-    //print("++++++++++++:\n\(source)\n")
-    let (_, nsImage) = MTMathImage(
-      latex: source,
-      fontSize: fontSize,
-      textColor: MTColor(foregroundColor),
-      labelMode: hasLatexBlock ? .display : .text
-    ).asImage()
-
-    guard let nsImage else {
-        print("=========:\n\(source)\n")
-      return Text(source)
-    }
-
-    var nsFont: NSFont
-    let attributedString = NSAttributedString(AttributedString(" ", attributes: att))
-    if let fontFromAttributes = attributedString.attribute(.font, at: 0, effectiveRange: nil) as? NSFont, fontFromAttributes.pointSize > 0 {
-        nsFont = fontFromAttributes
-    } else {
-        nsFont = .systemFont(ofSize: NSFont.systemFontSize)
-    }
-
-    let imageHeight = nsImage.size.height
-    let fontXHeight = nsFont.xHeight
-    let offset = (imageHeight / 2.0) - (fontXHeight / 2.0)
-    let baselineOffset = -offset
-    
-    let imageAsText = Text("\(Image(nsImage: nsImage))")
-        .baselineOffset(baselineOffset)
-    
-    return imageAsText
-}
-
-func renderTextWithLatex(from attributedInput: AttributedString, cache: [String: String]) -> Text {
-    var finalTextView = Text("")
-    var currentIndex = attributedInput.startIndex
-
-    let placeholderPrefix = "LATEX_PLACEHOLDER_6A8C5E7B_"
-    let regex = try! NSRegularExpression(pattern: "\(placeholderPrefix)\\d+")
-    
-    let plainString = String(attributedInput.characters)
-    let matches = regex.matches(in: plainString, range: NSRange(plainString.startIndex..., in: plainString))
-    
-    var lastMatchEnd = attributedInput.startIndex
-    
-    for match in matches {
-        guard let matchRange = Range(match.range, in: attributedInput) else { continue }
-        
-        // 1. 追加占位符之前的普通文本
-        if matchRange.lowerBound > lastMatchEnd {
-            // 【修复】: 将切片 AttributedSubstring 转换回 AttributedString
-            let substring = attributedInput[lastMatchEnd..<matchRange.lowerBound]
-            finalTextView = finalTextView + Text(AttributedString(substring))
-        }
-        
-        // 2. 找到占位符，从缓存中恢复 LaTeX 并渲染
-        let placeholderKey = String(attributedInput[matchRange].characters)
-        if let latexString = cache[placeholderKey] {
-            var localAttributes = AttributeContainer()
-            if let run = attributedInput.runs.first(where: { $0.range.contains(matchRange.lowerBound) }) {
-                localAttributes = run.attributes
-            }
-            
-            finalTextView = finalTextView + LatexView(latexString, att: localAttributes)
-        } else {
-            finalTextView = finalTextView + Text(placeholderKey).foregroundColor(.red)
-        }
-        
-        lastMatchEnd = matchRange.upperBound
-    }
-    
-    // 3. 追加最后一个占位符之后的文本
-    if lastMatchEnd < attributedInput.endIndex {
-        // 【修复】: 同样，将切片转换回 AttributedString
-        let substring = attributedInput[lastMatchEnd...]
-        finalTextView = finalTextView + Text(AttributedString(substring))
-    }
-    
-    return finalTextView
-}
-*/
 #if false
-// MARK: - Data Structures
-enum BlockType {
-    case markdownBlock
-    case latexBlock
-}
-
-struct ExtractedBlock {
-    let type: BlockType
-    let content: String
-    let range: Range<String.Index> // 新增！
-}
-
-struct ExtractionResult {
-    let hasLatex: Bool
-    let blocks: [ExtractedBlock]
-}
-
-// MARK: - SimpleLatexExtractor
-final class SimpleLatexExtractor {
-
-    // MARK: - Public API
-    //static func reJoinedWithLatex(from text: String) -> String {
-    //    let result = extract(from: text)
-    //    return result.blocks.map { $0.content }.joined()
-    //}
-
-    // In class SimpleLatexExtractor
-
-    /// 主提取函数：分离出 LaTeX 和普通 Markdown/代码块，并返回带范围的块列表。
-    static func extract(from text: String) -> ExtractionResult {
-        if text.isEmpty {
-            return ExtractionResult(hasLatex: false, blocks: [])
-        }
-
-        // --- 1. 正则表达式定义 (保持不变) ---
-        // 代码块正则
-        let codeRegex = try! NSRegularExpression(pattern: #"`{3,}[\s\S]*?`{3,}|``[\s\S]*?``|`[^`]+?`"#, options: [])
-        // LaTeX 公式正则
-        let latexRegex = try! NSRegularExpression(pattern:
-            #"""
-            (?smx) # s: '.' 匹配换行; m: '^'和'$'匹配行首行尾; x: 扩展模式
-            # 块级公式
-            ^\s* \$\$ [\s\S]*? \$\$ \s* $ |
-            ^\s* \\\[ [\s\S]*? \\\] \s* $ |
-            # 内联公式
-            (?<![a-zA-Z0-9]|\\|\$) \$ ([^$]+?) \$ (?![a-zA-Z0-9]|\$) |
-            \\\( ([\s\S]*?) \\\)
-            """#, options: [])
-
-        // --- 2. 查找所有匹配 ---
-        let codeMatches = codeRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-        let latexMatches = latexRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-
-        // --- 3. 过滤掉在代码块内部的 LaTeX 公式 (保持不变) ---
-        let codeRanges = codeMatches.map { $0.range }
-        let validLatexMatches = latexMatches.filter { latexMatch in
-            !codeRanges.contains { codeRange in
-                NSIntersectionRange(latexMatch.range, codeRange).length > 0
-            }
-        }
-
-        // --- 4. 将所有有效匹配（代码+LaTeX）合并并排序 ---
-        let allMatches = (codeMatches.map { (match: $0, type: BlockType.markdownBlock) } +
-                          validLatexMatches.map { (match: $0, type: BlockType.latexBlock) })
-            .sorted { $0.match.range.location < $1.match.range.location }
-
-        // --- 5. 构建最终的、包含所有文本片段的块列表 (核心修改) ---
-        var finalBlocks: [ExtractedBlock] = []
-        var lastIndex = text.startIndex
-        var hasLatex = !validLatexMatches.isEmpty
-
-        for item in allMatches {
-            guard let matchRange = Range(item.match.range, in: text) else { continue }
-
-            // a. 追加上一个匹配和当前匹配之间的普通文本
-            if matchRange.lowerBound > lastIndex {
-                let range = lastIndex..<matchRange.lowerBound
-                let content = String(text[range])
-                finalBlocks.append(ExtractedBlock(type: .markdownBlock, content: content, range: range))
-            }
-
-            // b. 处理当前匹配
-            let content = String(text[matchRange])
-            finalBlocks.append(ExtractedBlock(type: item.type, content: content, range: matchRange))
-            
-            lastIndex = matchRange.upperBound
-        }
-
-        // c. 追加最后一个匹配之后的所有剩余文本
-        if lastIndex < text.endIndex {
-            let range = lastIndex..<text.endIndex
-            let content = String(text[range])
-            finalBlocks.append(ExtractedBlock(type: .markdownBlock, content: content, range: range))
-        }
-
-        // 注意：我们不再需要 mergeAdjacentMixedContent，因为这个新逻辑已经正确处理了所有片段。
-        return ExtractionResult(hasLatex: hasLatex, blocks: finalBlocks)
-    }
-    
-    // MARK: - Private Implementation
-    
-    /*private static func fixAndWrapBlockLatex(_ rawBlock: String) -> String {
-        var content = rawBlock
-        if content.hasPrefix("$$") { content = String(content.dropFirst(2)) }
-        if content.hasPrefix("\\[") { content = String(content.dropFirst(2)) }
-        if content.hasSuffix("$$") { content = String(content.dropLast(2)) }
-        if content.hasSuffix("\\]") { content = String(content.dropLast(2)) }
-        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        return "$$ " + trimmedContent.replacingOccurrences(of: "\n", with: " ") + " $$"
-    }
-    
-    private static func mergeAdjacentMixedContent(in blocks: [ExtractedBlock]) -> [ExtractedBlock] {
-        guard !blocks.isEmpty else { return [] }
-        var merged: [ExtractedBlock] = []
-        var currentContent = ""
-        for block in blocks {
-            if block.type == .markdownBlock {
-                currentContent.append(block.content)
-            } else {
-                if !currentContent.isEmpty {
-                    merged.append(ExtractedBlock(type: .markdownBlock, content: currentContent))
-                    currentContent = ""
-                }
-                merged.append(block)
-            }
-        }
-        if !currentContent.isEmpty {
-            merged.append(ExtractedBlock(type: .markdownBlock, content: currentContent))
-        }
-        return merged
-    }*/
-
-    // 这是一个特殊的、几乎不可能在普通文本中出现的占位符
-    private static let placeholderPrefix = "LATEX_PLACEHOLDER_6A8C5E7B_"
-    
-    // 用于存储被提取出来的 LaTeX 公式
-    private static var latexCache: [String: String] = [:]
-    
-    private static var placeholderCounter = 0
-    
-    /// 预处理 Markdown 文本。
-    /// 1. 提取所有 LaTeX 公式。
-    /// 2. 用唯一的占位符替换它们。
-    /// 3. 返回被“净化”过的 Markdown 文本和包含公式的缓存。
-    static func preprocess(markdown: String) -> String {
-        self.latexCache = [:]
-        var processedText = ""
-        
-        let result = SimpleLatexExtractor.extract(from: markdown)
-        
-        for block in result.blocks {
-            if block.type == .latexBlock {
-                // 如果是 LaTeX 块，创建占位符并存入缓存
-                var placeholder = "\(placeholderPrefix)\(placeholderCounter)"
-                self.latexCache[placeholder] = block.content
-                //if isBlockLatex(source: block.content) {
-                    //placeholder = placeholder.trimmingCharacters(in: .whitespacesAndNewlines)
-                    //placeholder = "\n\(placeholder)\n"
-                //}
-                //self.latexCache[placeholder] = block.content
-                processedText.append(placeholder)
-                placeholderCounter += 1
-            } else {
-                // 如果是普通 Markdown/代码块，直接追加
-                processedText.append(block.content)
-            }
-        }
-        
-        return processedText
-    }
-    /*
-    /// 一个简单的辅助函数，用于判断一个字符串是否是内联 LaTeX
-    static private func isInlineLatex(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        return (trimmed.hasPrefix("$") && trimmed.hasSuffix("$") && !trimmed.hasPrefix("$$")) ||
-               (trimmed.hasPrefix("\\(") && trimmed.hasSuffix("\\)"))
-    }
-    
-    static func recoverLatex(from textWithPlaceholders: String) -> String {
-        // 如果缓存为空，或者文本不包含占位符前缀，说明无需处理，直接返回原字符串以提高效率。
-        if latexCache.isEmpty || !textWithPlaceholders.contains(placeholderPrefix) {
-            return textWithPlaceholders
-        }
-        
-        var recoveredString = textWithPlaceholders
-        
-        // 遍历缓存中的每一个占位符和其对应的原始 LaTeX 公式
-        for (placeholder, originalLatex) in latexCache {
-            // 在整个字符串中，将占位符替换回原始的 LaTeX 公式
-            recoveredString = recoveredString.replacingOccurrences(of: placeholder, with: originalLatex)
-        }
-        
-        return recoveredString
-    }*/
-    
-    static func renderTextWithLatex(from attributedInput: AttributedString, container: AttributeContainer) -> Text {
-        var finalTextView = Text("")
-        var currentIndex = attributedInput.startIndex
-
-        //let placeholderPrefix = "LATEX_PLACEHOLDER_6A8C5E7B_"
-        let regex = try! NSRegularExpression(pattern: "\(placeholderPrefix)\\d+")
-        
-        let plainString = String(attributedInput.characters)
-        let matches = regex.matches(in: plainString, range: NSRange(plainString.startIndex..., in: plainString))
-        
-        var lastMatchEnd = attributedInput.startIndex
-        
-        for match in matches {
-            guard let matchRange = Range(match.range, in: attributedInput) else { continue }
-            
-            // 1. 追加占位符之前的普通文本
-            if matchRange.lowerBound > lastMatchEnd {
-                // 【修复】: 将切片 AttributedSubstring 转换回 AttributedString
-                let substring = attributedInput[lastMatchEnd..<matchRange.lowerBound]
-                finalTextView = finalTextView + Text(AttributedString(substring))
-            }
-            
-            // 2. 找到占位符，从缓存中恢复 LaTeX 并渲染
-            let placeholderKey = String(attributedInput[matchRange].characters)
-            if let latexString = latexCache[placeholderKey] {
-                finalTextView = finalTextView + LatexView(latexString, container: container)
-                //let placeholderSubstring = attributedInput[matchRange]
-                //let latexContainer = placeholderSubstring.runs.first?.attributes ?? container
-                //finalTextView = finalTextView + LatexView(latexString, container: latexContainer)
-            } else {
-                finalTextView = finalTextView + Text(placeholderKey).foregroundColor(.red)
-            }
-            
-            lastMatchEnd = matchRange.upperBound
-        }
-        
-        // 3. 追加最后一个占位符之后的文本
-        if lastMatchEnd < attributedInput.endIndex {
-            // 【修复】: 同样，将切片转换回 AttributedString
-            let substring = attributedInput[lastMatchEnd...]
-            finalTextView = finalTextView + Text(AttributedString(substring))
-        }
-        
-        return finalTextView
-    }
-    
-    private static func LatexView(_ source: String, container: AttributeContainer) -> Text {
-        let fontSize = container.fontProperties?.size ?? 14
-        let foregroundColor = container.foregroundColor ?? .primary
-        let hasLatexBlock = isBlockLatex(source: source)
-        //print("++++++++++++:\n\(source)\n")
-        let mathImage = MTMathImage(
-            latex: source,
-            fontSize: fontSize,
-            textColor: MTColor(foregroundColor),
-            labelMode: hasLatexBlock ? .display : .text
-          )
-        
-        //mathImage.font = MTFontManager.manager.xitsFont(withSize: fontSize)
-        
-        let (_, nsImage) = mathImage.asImage()
-        guard let nsImage else {
-            print("=========:\n\(source)\n")
-          return Text(source)
-        }
-
-        var nsFont: NSFont
-        let attributedString = NSAttributedString(AttributedString(" ", attributes: container))
-        if let fontFromAttributes = attributedString.attribute(.font, at: 0, effectiveRange: nil) as? NSFont, fontFromAttributes.pointSize > 0 {
-            nsFont = fontFromAttributes
-        } else {
-            nsFont = .systemFont(ofSize: NSFont.systemFontSize)
-        }
-
-        let imageHeight = nsImage.size.height
-        let fontXHeight = nsFont.xHeight
-        let offset = (imageHeight / 2.0) - (fontXHeight / 2.0)
-        let baselineOffset = -offset
-        
-        let imageAsText = Text("\(Image(nsImage: nsImage))")
-            .baselineOffset(baselineOffset)
-        
-        return hasLatexBlock ? Text("\n") + imageAsText + Text("\n"): imageAsText
-        //return imageAsText
-    }
-    
-    static private func isBlockLatex(source: String) -> Bool {
-        // 1. 移除字符串首尾的所有空白字符（空格、换行符等）
-        let trimmedSource = source.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // 2. 在处理过的、干净的字符串上进行判断
-        if trimmedSource.hasPrefix("$$") && trimmedSource.hasSuffix("$$") {
-            return true
-        }
-        
-        if trimmedSource.hasPrefix("\\[") && trimmedSource.hasSuffix("\\]") {
-            return true
-        }
-        
-        return false
-    }
-    
-    static func latexBlockNodeRule(blockNode: BlockNode) -> [BlockNode] {
-        // 1. 检查节点是否为段落，且其中只有一个子节点，且该子节点为文本。
-        guard case .paragraph(let children) = blockNode,
-              children.count == 1,
-              case .text(let placeholderKey) = children.first else {
-            // 如果不满足，说明是普通段落或混合内容段落，原样返回。
-            return [blockNode]
-        }
-        print("+++++++++\(placeholderKey)")
-        // 2. 检查这个文本是否是我们的占位符。
-        //    `.trimmingCharacters` 用于处理解析器可能在占位符前后加入的不可见空白。
-        let trimmedKey = placeholderKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmedKey.hasPrefix(placeholderPrefix) else {
-            // 不是占位符，原样返回。
-            print("========\(placeholderKey)")
-            return [blockNode]
-        }
-        //print("========\(placeholderKey)")
-        // 3. 从缓存中恢复原始的 LaTeX 字符串。
-        guard let originalLatex = latexCache[trimmedKey] else {
-            // 在缓存中找不到（理论上不应发生），作为错误处理，原样返回。
-            return [blockNode]
-        }
-        print("--------\(originalLatex)")
-        // 4. 判断恢复后的字符串是否是块级公式。
-        if isBlockLatex(source: originalLatex) {
-            // 是块级公式！
-            // 创建并返回我们自定义的 LaTeX 块节点，
-            // 注意：我们存储的是【原始的 LaTeX 内容】，而不是占位符！
-            // 这样后续的渲染步骤就可以直接使用这个内容了。
-            return [BlockNode.latexBlock(content: originalLatex)]
-        } else {
-            // 虽然是占位符，但它代表的是一个内联公式。
-            // 我们不希望转换它，让它保持为段落，后续由 inline 规则处理。
-            return [blockNode]
-        }
-    }
-}
-#else
-// In: Sources/MarkdownUI/LaTeXRewriter.swift
 import Foundation
 import SwiftUI
 import SwiftMath
@@ -690,6 +27,7 @@ final class SimpleLatexExtractor {
     // 这是一个特殊的、几乎不可能在普通文本中出现的占位符前缀
     private static let placeholderBlockPrefix = "LATEX_BLOCK_PLACEHOLDER_6A8C5E7B_"
     private static let placeholderInlinePrefix = "LATEX_INLINE_PLACEHOLDER_6A8C5E7B_"
+    private static var placeholderCodeBlockPrefix = "__CODE_BLOCK_PLACEHOLDER_"
     
     // 用于存储被提取出来的 LaTeX 公式，键是占位符，值是原始 LaTeX 字符串
     private static var latexCache: [String: String] = [:]
@@ -703,13 +41,8 @@ final class SimpleLatexExtractor {
     /// **步骤 1: 预处理 Markdown 文本**
     /// 提取所有 LaTeX 公式，用唯一的占位符替换它们，并返回净化后的 Markdown 文本。
     /// 这个函数应该在将 Markdown 字符串传递给解析器之前调用。
-    ///
-    /// - Parameter markdown: 原始的、包含 LaTeX 的 Markdown 字符串。
-    /// - Returns: 一个“净化”过的、所有 LaTeX 都被替换为占位符的字符串。
-    /// **步骤 1: 预处理 Markdown 文本【终极简化版】**
-    /// 直接在原始 Markdown 字符串上查找并替换所有 LaTeX 公式，无需独立的提取步骤。
-    public static func preprocess(markdown: String) -> String {
-
+    /*public static func preprocess(markdown: String) -> String {
+        //print("--- DEBUG: Preprocessing input ---\n\(markdown)\n---------------------------------")
         var processedText = markdown
         
         // --- 1. 定义正则表达式 ---
@@ -729,7 +62,7 @@ final class SimpleLatexExtractor {
         let fullRange = NSRange(markdown.startIndex..., in: markdown)
         let codeMatches = codeRegex.matches(in: markdown, range: fullRange)
         let latexMatches = latexRegex.matches(in: markdown, range: fullRange)
-
+        //print("--- DEBUG: Preprocessing latexMatches ---\n\(latexMatches)\n---------------------------------")
         // --- 3. 过滤掉在代码块内部的 LaTeX 公式 ---
         let codeRanges = codeMatches.map { $0.range }
         let validLatexMatches = latexMatches.filter { latexMatch in
@@ -737,7 +70,7 @@ final class SimpleLatexExtractor {
                 NSIntersectionRange(latexMatch.range, codeRange).length > 0
             }
         }
-        
+        //print("--- DEBUG: Preprocessing validLatexMatches ---\n\(validLatexMatches)\n---------------------------------")
         // 如果没有有效的 LaTeX，直接返回
         guard !validLatexMatches.isEmpty else {
             return markdown
@@ -775,8 +108,135 @@ final class SimpleLatexExtractor {
 
         //print("========\(processedText)")
         return processedText
-    }
+    }*/
 
+    static func preprocess(markdown: String) -> String {
+        var placeholdercodeBlockCounter = 0
+        var codeBlockCache: [String: String] = [:]
+
+        var processedText = markdown
+        
+        let codeRegex = try! NSRegularExpression(
+            pattern: #"""
+            # 围栏式代码块
+            ^ \s* (?<fence>`{3,}|~{3,}) .*? \n [\s\S]+? \n \s* \k<fence> \s* $
+            |
+            # 行内代码，双反引号
+            `` [^`\n]*? ``
+            |
+            # 行内代码，单反引号
+            # 关键修复：内容不能以 $ 开头，也不能以 $ 结尾
+            # 这可以防止它匹配到 `$code$` 这种会被误认为 LaTeX 的情况
+            `
+            (?!\$)  # 不能以 $ 开头
+            [^`\n]+? # 内容
+            (?<!\$) # 不能以 $ 结尾
+            `
+            """#,
+            options: [.allowCommentsAndWhitespace, .anchorsMatchLines]
+        )
+        
+        // 你的 latexRegex 已经很好了，我们继续使用它
+        let latexRegex = try! NSRegularExpression(
+            pattern: #"""
+            # x: 扩展/注释模式 (通过 .allowCommentsAndWhitespace 启用)
+            # s: '.' 匹配换行 (通过 .dotMatchesLineSeparators 启用)
+            # m: '^' 匹配行首 (通过 .anchorsMatchLines 启用)
+
+            # 块级公式 (匹配独占一行的 $$...$$ 或 \[...\])
+            (?:(?<=^|\n)\s*)
+            (
+              \$\$ .+? \$\$ |
+              \\\[ .+? \\\]
+            ) |
+            # 内联公式 (匹配 $...$ 或 \(...\) 但避免匹配 $$)
+            (?<!\$)\$ ([^\$\n]+) \$(?!\$) |
+            \\\( .+? \\\)
+            """#,
+            options: [
+                .allowCommentsAndWhitespace, // 正确的选项，用于开启注释和自由空格模式
+                .anchorsMatchLines,          // 使得 ^ 和 $ 匹配行的开始和结束
+                .dotMatchesLineSeparators    // 使得 '.' 可以匹配换行符
+            ]
+        )
+
+        // --- 2. 查找所有匹配并过滤（与原来相同）---
+        let fullRange = NSRange(markdown.startIndex..., in: markdown)
+        let codeMatches = codeRegex.matches(in: markdown, range: fullRange)
+        let latexMatches = latexRegex.matches(in: markdown, range: fullRange)
+        
+        let codeRanges = codeMatches.map { $0.range }
+        
+        // ==================【 添加这段决定性的调试代码 】==================
+        //print("--- DEBUG: TOTAL CODE BLOCKS FOUND: \(codeMatches.count) ---")
+        for (index, codeMatch) in codeMatches.enumerated() {
+            let codeString = (markdown as NSString).substring(with: codeMatch.range)
+            // 只打印较短的代码块，避免日志过长
+            if codeString.count < 200 {
+                print("Code Block \(index) (\(codeMatch.range)): \(codeString)")
+            } else {
+                print("Code Block \(index) (\(codeMatch.range)): [Content too long, length: \(codeString.count)]")
+            }
+        }
+        // =============================================================
+        
+        let validLatexMatches = latexMatches.filter { latexMatch in
+            !codeRanges.contains { codeRange in
+                NSIntersectionRange(latexMatch.range, codeRange).length > 0
+            }
+        }
+        //print("--- DEBUG: Preprocessing latexMatches ---\n\(latexMatches)\n---------------------------------")
+        //print("--- DEBUG: Preprocessing validLatexMatches ---\n\(validLatexMatches)\n---------------------------------")
+        guard !validLatexMatches.isEmpty else {
+            return markdown
+        }
+
+        // --- 3. 【核心逻辑优化】从后向前替换，使用 Parser 进行分类 ---
+        for match in validLatexMatches.reversed() {
+            guard let range = Range(match.range, in: processedText) else { continue }
+            
+            let originalLatex = String(processedText[range])
+            
+            // **【新变化】在这里使用 Parser 来分析匹配到的内容**
+            let components: [Component] = Parser.parse(originalLatex.trimmingCharacters(in: .whitespacesAndNewlines))
+            
+            // 一个有效的公式匹配应该只解析出一个组件
+            guard components.count == 1, let component = components.first, component.type.isEquation else {
+                // 如果 Parser 认为这不是一个单一、有效的公式，就跳过它
+                // 这增加了代码的健壮性，防止正则表达式的误匹配
+                continue
+            }
+            
+            // **【新变化】使用 component.type.inline 来判断公式类型**
+            if !component.type.inline { // 这是块级公式
+                let placeholder = "\(placeholderBlockPrefix)\(placeholderBlockCounter)"
+                placeholderBlockCounter += 1
+                
+                // 使用组件的 originalText 来缓存，确保是纯净的公式文本
+                self.latexCache[placeholder] = component.originalText
+                
+                // 【保留的逻辑】这里的缩进处理完全复用你原来的代码，因为它依赖于 range
+                // 1. 提取原始块的行首缩进
+                let indentation = getIndentation(of: range.lowerBound, in: processedText)
+                
+                // 2. 构建既保留缩进又强制分段的替换字符串
+                let replacementString = "\n\n" + indentation + placeholder + "\n\n"
+                
+                processedText.replaceSubrange(range, with: replacementString)
+                
+            } else { // 这是内联公式
+                let placeholder = "\(placeholderInlinePrefix)\(placeholderInlineCounter)"
+                placeholderInlineCounter += 1
+                
+                self.latexCache[placeholder] = component.originalText
+                
+                // 对于内联公式，直接替换
+                processedText.replaceSubrange(range, with: placeholder)
+            }
+        }
+
+        return processedText
+    }
 
     /// **步骤 2: 自定义块级规则**
     /// 这个函数在 Markdown 解析后，作为自定义规则被调用。
@@ -784,7 +244,7 @@ final class SimpleLatexExtractor {
     ///
     /// - Parameter blockNode: Markdown 解析器生成的块节点。
     /// - Returns: 转换后的块节点数组。
-    static func latexBlockNodeRule(blockNode: BlockNode) -> [BlockNode] {
+    /*static func latexBlockNodeRule(blockNode: BlockNode) -> [BlockNode] {
         // 1. 检查节点是否为段落，且其中只有一个子节点，且该子节点为文本。
         //    这是识别出块级公式占位符的关键前提。
         //print("========\n\(blockNode)\n")
@@ -812,7 +272,7 @@ final class SimpleLatexExtractor {
         //latexCache[trimmedKey] = nil
         return [BlockNode.latexBlock(content: originalLatex)]
 
-    }
+    }*/
 
     /// **步骤 3: 渲染包含内联公式的文本**
     /// 当渲染一个段落的 AttributedString 时，调用此函数。
@@ -870,84 +330,7 @@ final class SimpleLatexExtractor {
         
         return finalTextView
     }
-    
-    // MARK: - Private Implementation
-    /*
-    /// 主提取函数：分离出 LaTeX 和普通 Markdown/代码块。
-    private static func extract(from text: String) -> ExtractionResult {
-        if text.isEmpty {
-            return ExtractionResult(hasLatex: false, blocks: [])
-        }
-        //print("========\n\(text)\n")
-        // 正则表达式:
-        // 1. `codeRegex`: 匹配所有形式的代码块 (```, ``, ``)
-        let codeRegex = try! NSRegularExpression(pattern: #"`{3,}[\s\S]*?`{3,}|``[\s\S]*?``|`[^`]+?`"#, options: [])
-        // LaTeX 公式正则
-        let latexRegex = try! NSRegularExpression(pattern:
-            #"""
-            (?smx) # s: '.' 匹配换行; m: '^'和'$'匹配行首行尾; x: 扩展模式
-            # 块级公式
-            ^\s* \$\$ [\s\S]*? \$\$ \s* $ |
-            ^\s* \\\[ [\s\S]*? \\\] \s* $ |
-            # 内联公式
-            (?<![a-zA-Z0-9]|\\|\$) \$ ([^$]+?) \$ (?![a-zA-Z0-9]|\$) |
-            \\\( ([\s\S]*?) \\\)
-            """#, options: [])
 
-        // 查找所有匹配
-        let codeMatches = codeRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-        let latexMatches = latexRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-
-        // 过滤掉在代码块内部的 LaTeX 公式
-        let codeRanges = codeMatches.map { $0.range }
-        let validLatexMatches = latexMatches.filter { latexMatch in
-            !codeRanges.contains { codeRange in
-                NSIntersectionRange(latexMatch.range, codeRange).length > 0
-            }
-        }
-
-        if validLatexMatches.isEmpty {
-            return ExtractionResult(hasLatex: false, blocks: [ExtractedBlock(type: .markdownBlock, content: text)])
-        }
-        
-        // 将所有有效匹配（代码+LaTeX）合并并按位置排序
-        let allMatches = (codeMatches.map { (match: $0, type: BlockType.markdownBlock) } +
-                          validLatexMatches.map { (match: $0, type: BlockType.latexBlock) })
-            .sorted { $0.match.range.location < $1.match.range.location }
-
-        // 构建最终的、包含所有文本片段的块列表
-        var finalBlocks: [ExtractedBlock] = []
-        var lastIndex = text.startIndex
-
-        for item in allMatches {
-            guard let matchRange = Range(item.match.range, in: text) else { continue }
-
-            // a. 追加上一个匹配和当前匹配之间的普通文本
-            if matchRange.lowerBound > lastIndex {
-                let content = String(text[lastIndex..<matchRange.lowerBound])
-                if !content.isEmpty {
-                    finalBlocks.append(ExtractedBlock(type: .markdownBlock, content: content))
-                }
-            }
-
-            // b. 处理当前匹配
-            let content = String(text[matchRange])
-            finalBlocks.append(ExtractedBlock(type: item.type, content: content))
-            
-            lastIndex = matchRange.upperBound
-        }
-
-        // c. 追加最后一个匹配之后的所有剩余文本
-        if lastIndex < text.endIndex {
-            let content = String(text[lastIndex..<text.endIndex])
-            if !content.isEmpty {
-                finalBlocks.append(ExtractedBlock(type: .markdownBlock, content: content))
-            }
-        }
-        //print("========\n\(finalBlocks)\n")
-        return ExtractionResult(hasLatex: true, blocks: finalBlocks)
-    }
-    */
     /// 辅助函数：将 LaTeX 字符串渲染为 SwiftUI 视图
     static func LatexView(_ source: String, container: AttributeContainer) -> Text {
         let fontSize = container.fontProperties?.size ?? 14
@@ -955,13 +338,7 @@ final class SimpleLatexExtractor {
         let isBlock = isBlockLatex(source: source)
         //print("---------\n\(source)\n")
         /*let source = """
-        $$
-        \\begin{Vmatrix}
-        a_{11} & \\dots & a_{1n} \\\\
-        \\vdots & \\ddots & \\vdots \\\\
-        a_{m1} & \\dots & a_{mn}
-        \\end{Vmatrix}
-        $$
+         $\nabla a \mathbf{E} = \frac{\rho}{\epsilon_0}$
         """*/
         // 使用 SwiftMath 渲染 LaTeX
         let (_, nsImage) = MTMathImage(
@@ -1018,8 +395,6 @@ final class SimpleLatexExtractor {
         return String(text[lineStart...])
     }
 }
-#endif
-
 
 struct LatexBlockView: View {
     @Environment(\.textStyle) var textStyle
@@ -1042,3 +417,266 @@ struct LatexBlockView: View {
         .padding(.bottom, 10)
     }
 }
+
+
+/// A block of components.
+struct ComponentBlock: Hashable, Identifiable {
+  
+  /// The component's identifier.
+  ///
+  /// Unique to every instance.
+  let id = UUID()
+  
+  /// The block's components.
+  let components: [Component]
+  
+  /// True iff this block has only one component and that component is
+  /// not inline.
+  var isEquationBlock: Bool {
+    components.count == 1 && !components[0].type.inline
+  }
+}
+
+/// A LaTeX component.
+struct Component: CustomStringConvertible, Equatable, Hashable {
+  
+  /// A LaTeX component type.
+  enum ComponentType: String, Equatable, CustomStringConvertible {
+    
+    /// A text component.
+    case text
+    
+    /// An inline equation component.
+    ///
+    /// - Example: `$x^2$`
+    case inlineEquation
+    
+    /// An inline equation component.
+    ///
+    /// - Example: `\(x^2\)`
+    case inlineParenthesesEquation
+    
+    /// A TeX-style block equation.
+    ///
+    /// - Example: `$$x^2$$`.
+    case texEquation
+    
+    /// A block equation.
+    ///
+    /// - Example: `\[x^2\]`
+    case blockEquation
+    
+    /// A named equation component.
+    ///
+    /// - Example: `\begin{equation}x^2\end{equation}`
+    case namedEquation
+    
+    /// A named equation component.
+    ///
+    /// - Example: `\begin{equation*}x^2\end{equation*}`
+    case namedNoNumberEquation
+    
+    /// The component's description.
+    var description: String {
+      rawValue
+    }
+    
+    /// The order we should scan components when parsing.
+    static let order: [ComponentType] = [
+      .namedNoNumberEquation,
+      .namedEquation,
+      .blockEquation,
+      .texEquation,
+      .inlineEquation,
+      .inlineParenthesesEquation
+    ]
+    
+    /// The component's left terminator.
+    var leftTerminator: String? {
+      switch self {
+      case .text: return nil
+      case .inlineEquation: return "$"
+      case .inlineParenthesesEquation: return "\\("
+      case .texEquation: return "$$"
+      case .blockEquation: return "\\["
+      case .namedEquation: return "\\begin{equation}"
+      case .namedNoNumberEquation: return "\\begin{equation*}"
+      }
+    }
+    
+    /// The component's right terminator.
+    var rightTerminator: String? {
+      switch self {
+      case .text: return nil
+      case .inlineEquation: return "$"
+      case .inlineParenthesesEquation: return "\\)"
+      case .texEquation: return "$$"
+      case .blockEquation: return "\\]"
+      case .namedEquation: return "\\end{equation}"
+      case .namedNoNumberEquation: return "\\end{equation*}"
+      }
+    }
+    
+    /// Whether or not this component is inline.
+    var inline: Bool {
+      switch self {
+      case .text, .inlineEquation, .inlineParenthesesEquation: return true
+      default: return false
+      }
+    }
+    
+    /// True iff the component is not `text`.
+    var isEquation: Bool {
+      return self != .text
+    }
+  }
+  
+  /// The component's inner text.
+  let text: String
+  
+  /// The component's type.
+  let type: ComponentType
+  
+  /// The original input text that created this component.
+  var originalText: String {
+    "\(type.leftTerminator ?? "")\(text)\(type.rightTerminator ?? "")"
+  }
+  
+  /// The component's original text with newlines trimmed.
+  var originalTextTrimmingNewlines: String {
+    originalText.trimmingCharacters(in: .newlines)
+  }
+  
+  /// The component's description.
+  var description: String {
+    return "(\(type), \"\(text)\")"
+  }
+  
+  // MARK: Initializers
+  
+  /// Initializes a component.
+  ///
+  /// The text passed to the component is stripped of the left and right
+  /// terminators defined in the component's type.
+  ///
+  /// - Parameters:
+  ///   - text: The component's text.
+  ///   - type: The component's type.
+  init(text: String, type: ComponentType) {
+    if type.isEquation {
+      var text = text
+      if let leftTerminator = type.leftTerminator, text.hasPrefix(leftTerminator) {
+        text = String(text[text.index(text.startIndex, offsetBy: leftTerminator.count)...])
+      }
+      if let rightTerminator = type.rightTerminator, text.hasSuffix(rightTerminator) {
+        text = String(text[..<text.index(text.endIndex, offsetBy: -rightTerminator.count)])
+      }
+      self.text = text
+    }
+    else {
+      self.text = text
+    }
+    
+    self.type = type
+  }
+  
+}
+
+/// Parses text for LaTeX equations.
+class Parser {
+  
+  /// Parses the input text for component blocks.
+  ///
+  /// - Parameters:
+  ///   - text: The input text.
+  /// - Returns: An array of component blocks.
+  static func parse(_ text: String) -> [ComponentBlock] {
+    let components: [Component] = parse(text)
+    var blocks = [ComponentBlock]()
+    var blockComponents = [Component]()
+    for component in components {
+      if component.type.inline {
+        blockComponents.append(component)
+      } else {
+        blocks.append(ComponentBlock(components: blockComponents))
+        blocks.append(ComponentBlock(components: [component]))
+        blockComponents.removeAll()
+      }
+    }
+    if !blockComponents.isEmpty {
+      blocks.append(ComponentBlock(components: blockComponents))
+    }
+    return blocks
+  }
+  
+  /// Parses the input text in to components.
+  ///
+  /// - Parameter input: The input text.
+  /// - Returns: An array of components.
+  static func parse(_ input: String) -> [Component] {
+    var components: [Component] = []
+    var stack = [Component.ComponentType]()
+    var index = input.startIndex
+    var startIndex = index
+    var endIndex = index
+    
+    inputLoop: while index < input.endIndex {
+      let remaining = input[index...]
+      
+      if !stack.isEmpty {
+        for type in Component.ComponentType.order {
+          guard let end = type.rightTerminator else { continue }
+          if remaining.hasPrefix(end) {
+            if index > input.startIndex && input[input.index(before: index)] == "\\" {
+              index = input.index(index, offsetBy: end.count)
+              continue inputLoop
+            }
+            
+            let previousEndIndex = endIndex
+            endIndex = input.index(index, offsetBy: end.count)
+
+            if stack.last == type {
+              let lastType = stack.removeLast()
+              if stack.isEmpty {
+                if previousEndIndex < startIndex {
+                  components.append(Component(text: String(input[previousEndIndex..<startIndex]), type: .text))
+                }
+                
+                components.append(Component(text: String(input[startIndex..<endIndex]), type: lastType))
+              }
+            }
+            index = endIndex
+            continue inputLoop
+          }
+        }
+      }
+      
+      for type in Component.ComponentType.order {
+        guard let start = type.leftTerminator else { continue }
+        if remaining.hasPrefix(start) {
+          if index > input.startIndex && input[input.index(before: index)] == "\\" {
+            index = input.index(index, offsetBy: start.count)
+            continue inputLoop
+          }
+          
+          if stack.isEmpty {
+            startIndex = index
+          }
+          
+          stack.append(type)
+          index = input.index(index, offsetBy: start.count)
+          continue inputLoop
+        }
+      }
+      
+      index = input.index(after: index)
+    }
+    
+    if endIndex < index {
+      components.append(Component(text: String(input[endIndex..<index]), type: .text))
+    }
+    
+    return components
+  }
+}
+#endif

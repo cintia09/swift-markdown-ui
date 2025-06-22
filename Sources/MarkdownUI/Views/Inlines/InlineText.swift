@@ -7,6 +7,9 @@ struct InlineText: View {
   @Environment(\.softBreakMode) private var softBreakMode
   @Environment(\.theme) private var theme
 
+  @Environment(\.inlineAttributeRewriter) private var inlineAttributeRewriter
+  @Environment(\.inlineAttributeTextRender) private var inlineAttributeTextRender
+    
   @State private var inlineImages: [String: Image] = [:]
 
   private let inlines: [InlineNode]
@@ -28,7 +31,9 @@ struct InlineText: View {
         ),
         images: self.inlineImages,
         softBreakMode: self.softBreakMode,
-        attributes: attributes
+        attributes: attributes,
+        inlineAttributeRewriter: inlineAttributeRewriter,
+        inlineAttributedTextRender: inlineAttributeTextRender
       )
     }
     .task(id: self.inlines) {

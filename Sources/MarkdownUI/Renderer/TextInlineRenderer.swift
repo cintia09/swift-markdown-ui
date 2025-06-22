@@ -8,14 +8,18 @@ extension Sequence where Element == InlineNode {
     textStyles: InlineTextStyles,
     images: [String: Image],
     softBreakMode: SoftBreak.Mode,
-    attributes: AttributeContainer
+    attributes: AttributeContainer,
+    inlineAttributeRewriter: @escaping InlineAttributeRewriter,
+    inlineAttributedTextRender: @escaping InlineAttributedTextRender
   ) -> Text {
     var renderer = TextInlineRenderer(
       baseURL: baseURL,
       textStyles: textStyles,
       images: images,
       softBreakMode: softBreakMode,
-      attributes: attributes
+      attributes: attributes,
+      inlineAttributeRewriter: inlineAttributeRewriter,
+      inlineAttributedTextRender: inlineAttributedTextRender
     )
     renderer.render(self)
     return renderer.result
@@ -30,6 +34,8 @@ private struct TextInlineRenderer {
   private let images: [String: Image]
   private let softBreakMode: SoftBreak.Mode
   private let attributes: AttributeContainer
+  private let inlineAttributeRewriter: InlineAttributeRewriter
+  private let inlineAttributedTextRender: InlineAttributedTextRender
   private var shouldSkipNextWhitespace = false
 
   init(
@@ -37,13 +43,17 @@ private struct TextInlineRenderer {
     textStyles: InlineTextStyles,
     images: [String: Image],
     softBreakMode: SoftBreak.Mode,
-    attributes: AttributeContainer
+    attributes: AttributeContainer,
+    inlineAttributeRewriter: @escaping InlineAttributeRewriter,
+    inlineAttributedTextRender: @escaping InlineAttributedTextRender
   ) {
     self.baseURL = baseURL
     self.textStyles = textStyles
     self.images = images
     self.softBreakMode = softBreakMode
     self.attributes = attributes
+    self.inlineAttributeRewriter = inlineAttributeRewriter
+    self.inlineAttributedTextRender = inlineAttributedTextRender
   }
 
   mutating func render<S: Sequence>(_ inlines: S) where S.Element == InlineNode {
@@ -108,16 +118,26 @@ private struct TextInlineRenderer {
   }
     
   private mutating func defaultRender(_ inline: InlineNode) {
-    let attributedString = inline.renderAttributedString(
-      baseURL: self.baseURL,
-      textStyles: self.textStyles,
-      softBreakMode: self.softBreakMode,
-      attributes: self.attributes
+      let initialAttributedString = inline.renderAttributedString(
+        baseURL: self.baseURL,
+        textStyles: self.textStyles,
+        softBreakMode: self.softBreakMode,
+        attributes: self.attributes,
+        inlineAttributeRewriter: self.inlineAttributeRewriter
+      )
+      
+    let fontSize = self.attributes.fontProperties.flatMap { props in
+        props.size * props.scale
+    }
+
+    let renderedText = self.inlineAttributedTextRender(
+        initialAttributedString,
+        self.attributes,
+        fontSize ?? 14,
+        self.attributes.foregroundColor ?? .primary
     )
       
-    //print("============\n\(attributedString)\n")
-    self.result = self.result +
-      SimpleLatexExtractor
-        .renderTextWithLatex(from: attributedString, container: self.attributes)
+    self.result = self.result + renderedText
+      
   }
 }

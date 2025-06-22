@@ -7,13 +7,15 @@ extension InlineNode {
     baseURL: URL?,
     textStyles: InlineTextStyles,
     softBreakMode: SoftBreak.Mode,
-    attributes: AttributeContainer
+    attributes: AttributeContainer,
+    inlineAttributeRewriter: @escaping InlineAttributeRewriter
   ) -> AttributedString {
     var renderer = AttributedStringInlineRenderer(
       baseURL: baseURL,
       textStyles: textStyles,
       softBreakMode: softBreakMode,
-      attributes: attributes
+      attributes: attributes,
+      inlineAttributeRewriter: inlineAttributeRewriter
     )
     renderer.render(self)
     return renderer.result.resolvingFonts()
@@ -27,18 +29,21 @@ private struct AttributedStringInlineRenderer {
   private let textStyles: InlineTextStyles
   private let softBreakMode: SoftBreak.Mode
   private var attributes: AttributeContainer
+  private let inlineAttributeRewriter: InlineAttributeRewriter
   private var shouldSkipNextWhitespace = false
 
   init(
     baseURL: URL?,
     textStyles: InlineTextStyles,
     softBreakMode: SoftBreak.Mode,
-    attributes: AttributeContainer
+    attributes: AttributeContainer,
+    inlineAttributeRewriter: @escaping InlineAttributeRewriter
   ) {
     self.baseURL = baseURL
     self.textStyles = textStyles
     self.softBreakMode = softBreakMode
     self.attributes = attributes
+    self.inlineAttributeRewriter = inlineAttributeRewriter
   }
 
   mutating func render(_ inline: InlineNode) {
@@ -74,7 +79,7 @@ private struct AttributedStringInlineRenderer {
       text = text.replacingOccurrences(of: "^\\s+", with: "", options: .regularExpression)
     }
 
-    self.result += .init(text, attributes: self.attributes)
+    self.result += self.inlineAttributeRewriter(text, self.attributes)
   }
 
   private mutating func renderSoftBreak() {

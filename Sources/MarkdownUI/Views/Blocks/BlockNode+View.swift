@@ -25,8 +25,8 @@ extension BlockNode: View {
             }
         case .thematicBreak:
             ThematicBreakView()
-        case .latexBlock(let content):
-            LatexBlockView(latexString: content)
+        //case .latexBlock(let content):
+            //LatexBlockView(latexString: content)
         }
     }
 }

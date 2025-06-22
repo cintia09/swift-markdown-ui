@@ -1,7 +1,7 @@
 import SwiftUI
 
-extension Font {
-  static func withProperties(_ fontProperties: FontProperties) -> Font {
+public extension Font {
+ public static func withProperties(_ fontProperties: FontProperties) -> Font {
     var font: Font
     let size = round(fontProperties.size * fontProperties.scale)
 
